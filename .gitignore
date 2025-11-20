@@ -1,0 +1,21 @@
+# Chrome extension
+*.crx
+*.pem
+
+# Node modules (if you add any build tools)
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+

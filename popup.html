@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bookmundi Map Tagger</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>📍Map Tagger</h1>
+        <p class="subtitle">Auto-tag maps on Bookmundi</p>
+      </div>
+
+      <div class="controls">
+        <div class="toggle-section">
+          <label class="toggle-label">
+            <input type="checkbox" id="autoTagToggle" />
+            <span class="toggle-slider"></span>
+            <span class="toggle-text">Auto-tag maps</span>
+          </label>
+        </div>
+
+        <div class="status-section">
+          <div class="status-item">
+            <span class="status-label">Status:</span>
+            <span id="statusText" class="status-value">Checking...</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Days found:</span>
+            <span id="daysStatus" class="status-value">-</span>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="tagNowBtn" class="btn btn-primary">Tag Map Now</button>
+          <button id="viewHistoryBtn" class="btn btn-secondary">
+            View History
+          </button>
+        </div>
+      </div>
+
+      <div id="historyPanel" class="history-panel hidden">
+        <h3>Tagged Maps History</h3>
+        <div id="historyList" class="history-list"></div>
+      </div>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
