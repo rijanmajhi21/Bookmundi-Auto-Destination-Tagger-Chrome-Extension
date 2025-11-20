@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Bookmundi Map Auto-Tagger
 
 A Chrome extension that automatically tags end destinations from day sections on Bookmundi map pages.
@@ -109,3 +110,7 @@ MIT License - feel free to use and modify as needed.
 ## Support
 
 For issues or questions, please check the code comments or modify the selectors in `content.js` to match your specific use case.
+=======
+# Bookmundi-Auto-Destination-Tagger-Chrome-Extension
+Automatically detects and tags the final destination in tour day descriptions.
+>>>>>>> 1f081c1b82d94c4205e6b63719d52f0c2c57988d
