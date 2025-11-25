@@ -82,7 +82,7 @@ body {
 }
 
 .toggle-label input[type="checkbox"]:checked + .toggle-slider {
-  background-color: #4caf50;
+  background-color: #3eb368;
 }
 
 .toggle-label input[type="checkbox"]:checked + .toggle-slider::before {
@@ -126,7 +126,7 @@ body {
 }
 
 .status-value.active {
-  color: #4caf50;
+  color: #3eb368;
 }
 
 .status-value.inactive {
@@ -151,14 +151,14 @@ body {
 }
 
 .btn-primary {
-  background-color: #4caf50;
+  background-color: #3eb368;
   color: white;
 }
 
 .btn-primary:hover {
-  background-color: #45a049;
+  background-color: #35a05a;
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(76, 175, 80, 0.3);
+  box-shadow: 0 4px 8px rgba(62, 179, 104, 0.3);
 }
 
 .btn-secondary {
@@ -206,7 +206,7 @@ body {
   padding: 10px;
   background: #f9f9f9;
   border-radius: 6px;
-  border-left: 3px solid #4caf50;
+  border-left: 3px solid #3eb368;
 }
 
 .history-item-title {
@@ -232,4 +232,16 @@ body {
   padding: 20px;
   color: #999;
   font-size: 13px;
+}
+
+.bookmundi-text {
+  font-weight: 600;
+}
+
+.book-text {
+  color: #000;
+}
+
+.mundi-text {
+  color: #3eb368;
 }

@@ -5,6 +5,8 @@ class MapTagger {
   constructor() {
     this.isEnabled = false;
     this.processedDays = new Set();
+    this.isProcessing = false;
+    this.lastCountry = null; // Track the country from previously tagged destinations
     this.init();
   }
 
@@ -441,46 +443,222 @@ class MapTagger {
             setTimeout(() => typeChar(index + 1), 50);
           } else {
             // Finished typing, wait for dropdown and try to select
-            setTimeout(() => {
-              const selected = this.selectFromDropdown(locationName, input);
-              if (!selected) {
-                // Wait a bit more and try again
-                setTimeout(() => {
-                  const selected2 = this.selectFromDropdown(
-                    locationName,
-                    input
-                  );
-                  if (!selected2) {
-                    // If still no match, clear the input and leave it blank
-                    input.value = "";
-                    const changeEvent = new Event("change", { bubbles: true });
-                    input.dispatchEvent(changeEvent);
+            // Use multiple retries with increasing delays to ensure dropdown appears
+            const trySelect = (attempt = 1, maxAttempts = 5) => {
+              const delay =
+                attempt === 1
+                  ? 1500
+                  : attempt === 2
+                  ? 2000
+                  : attempt === 3
+                  ? 2500
+                  : 3000;
+
+              setTimeout(() => {
+                // Check if dropdown is actually visible before trying to select
+                this.waitForDropdown(input, 800).then((hasDropdown) => {
+                  if (hasDropdown) {
+                    // Dropdown appeared - try to select
+                    // Pass preferred country if available
+                    const selected = this.selectFromDropdown(
+                      locationName,
+                      input,
+                      this.lastCountry
+                    );
+                    if (selected) {
+                      // Success! Wait a bit more to ensure selection is complete
+                      setTimeout(
+                        () =>
+                          resolve({
+                            success: true,
+                            dropdownAppeared: true,
+                            matchFound: true,
+                          }),
+                        1000
+                      );
+                      return;
+                    } else {
+                      // Dropdown appeared but no match found - this means we should skip
+                      if (attempt < maxAttempts) {
+                        // Try a few more times in case dropdown options are still loading
+                        trySelect(attempt + 1, maxAttempts);
+                      } else {
+                        // All attempts failed - dropdown appeared but no match found
+                        input.value = "";
+                        const changeEvent = new Event("change", {
+                          bubbles: true,
+                        });
+                        input.dispatchEvent(changeEvent);
+                        setTimeout(
+                          () =>
+                            resolve({
+                              success: false,
+                              dropdownAppeared: true,
+                              matchFound: false,
+                            }),
+                          500
+                        );
+                      }
+                      return;
+                    }
+                  } else {
+                    // Dropdown didn't appear - retry if we have more attempts
+                    if (attempt < maxAttempts) {
+                      trySelect(attempt + 1, maxAttempts);
+                    } else {
+                      // All attempts failed - dropdown never appeared
+                      input.value = "";
+                      const changeEvent = new Event("change", {
+                        bubbles: true,
+                      });
+                      input.dispatchEvent(changeEvent);
+                      setTimeout(
+                        () =>
+                          resolve({
+                            success: false,
+                            dropdownAppeared: false,
+                            matchFound: false,
+                          }),
+                        500
+                      );
+                    }
                   }
-                  // Wait a bit more to ensure selection is complete
-                  setTimeout(() => resolve(), 500);
-                }, 800);
-              } else {
-                // Wait a bit more to ensure selection is complete
-                setTimeout(() => resolve(), 800);
-              }
-            }, 1000); // Wait for dropdown to appear
+                });
+              }, delay);
+            };
+
+            trySelect();
           }
         };
 
         // Start typing
         typeChar(0);
       } catch (error) {
-        resolve();
+        resolve({ success: false, dropdownAppeared: false, matchFound: false });
       }
     });
   }
 
-  selectFromDropdown(locationName, inputElement) {
+  waitForDropdown(inputElement, timeout = 1000) {
+    const startTime = Date.now();
+    const checkInterval = 100;
+
+    return new Promise((resolve) => {
+      const check = () => {
+        // Try Bookmundi-specific selectors first
+        const bookmundiSelectors = [".suggestionbox", ".suggestions-list"];
+
+        for (const selector of bookmundiSelectors) {
+          const dropdowns = document.querySelectorAll(selector);
+          for (const dropdown of dropdowns) {
+            if (
+              dropdown.offsetParent !== null &&
+              window.getComputedStyle(dropdown).display !== "none"
+            ) {
+              if (inputElement) {
+                const inputRect = inputElement.getBoundingClientRect();
+                const dropdownRect = dropdown.getBoundingClientRect();
+                if (
+                  dropdownRect.top >= inputRect.top &&
+                  Math.abs(dropdownRect.left - inputRect.left) < 200
+                ) {
+                  // Check if dropdown has options
+                  const options = dropdown.querySelectorAll(
+                    ".suggestionbox-item, li, div[role='option'], .option, .dropdown-item, a, .suggestion, .autocomplete-item"
+                  );
+                  if (options.length > 0) {
+                    resolve(true);
+                    return;
+                  }
+                }
+              } else {
+                const options = dropdown.querySelectorAll(
+                  ".suggestionbox-item, li, div[role='option'], .option, .dropdown-item, a, .suggestion, .autocomplete-item"
+                );
+                if (options.length > 0) {
+                  resolve(true);
+                  return;
+                }
+              }
+            }
+          }
+        }
+
+        // Also check generic lists
+        const lists = Array.from(
+          document.querySelectorAll("ul, ol, div[role='listbox']")
+        );
+        for (const list of lists) {
+          if (
+            list.offsetParent !== null &&
+            window.getComputedStyle(list).display !== "none" &&
+            list.children.length > 0
+          ) {
+            if (inputElement) {
+              const inputRect = inputElement.getBoundingClientRect();
+              const listRect = list.getBoundingClientRect();
+              if (
+                listRect.top >= inputRect.top &&
+                Math.abs(listRect.left - inputRect.left) < 200
+              ) {
+                resolve(true);
+                return;
+              }
+            } else {
+              resolve(true);
+              return;
+            }
+          }
+        }
+
+        // Check if timeout exceeded
+        if (Date.now() - startTime >= timeout) {
+          resolve(false);
+          return;
+        }
+
+        // Continue checking
+        setTimeout(check, checkInterval);
+      };
+
+      check();
+    });
+  }
+
+  // Normalize accented characters (e.g., "Tapatía" -> "Tapatia")
+  normalizeAccents(str) {
+    if (!str) return "";
+    return str
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+  }
+
+  // Extract country from a location string (e.g., "Merida, Mexico" -> "Mexico")
+  extractCountry(locationString) {
+    if (!locationString) return null;
+    const match = locationString.match(/,\s*([^,]+)$/);
+    if (match) {
+      return match[1].trim().toLowerCase();
+    }
+    return null;
+  }
+
+  selectFromDropdown(locationName, inputElement, preferredCountry = null) {
     const locationLower = locationName.toLowerCase();
+    const locationNormalized = this.normalizeAccents(locationName);
     const locationWords = locationName
       .toLowerCase()
       .split(/[\s-]+/)
       .filter((w) => w.length > 0);
+
+    // Normalize preferred country for comparison
+    const preferredCountryNormalized = preferredCountry
+      ? this.normalizeAccents(preferredCountry.toLowerCase())
+      : null;
+    const locationWordsNormalized = locationWords.map((w) =>
+      this.normalizeAccents(w)
+    );
 
     // Look for dropdown/autocomplete options
     const findDropdown = () => {
@@ -544,18 +722,29 @@ class MapTagger {
         option.getAttribute("data-value") || optionText
       ).toLowerCase();
 
+      // Normalize accents for both option and location
+      const optionTextNormalized = this.normalizeAccents(optionText);
+      const optionValueNormalized = this.normalizeAccents(optionValue);
+
       let score = 0;
       let matchType = "";
 
-      // Highest priority: Exact match
-      if (optionText === locationLower || optionValue === locationLower) {
+      // Highest priority: Exact match (with and without accents)
+      if (
+        optionText === locationLower ||
+        optionValue === locationLower ||
+        optionTextNormalized === locationNormalized ||
+        optionValueNormalized === locationNormalized
+      ) {
         score = 1000;
         matchType = "exact match";
       }
       // Very high priority: Location name at start followed by comma (e.g., "Paris, France")
       else if (
         optionText.startsWith(locationLower + ",") ||
-        optionValue.startsWith(locationLower + ",")
+        optionValue.startsWith(locationLower + ",") ||
+        optionTextNormalized.startsWith(locationNormalized + ",") ||
+        optionValueNormalized.startsWith(locationNormalized + ",")
       ) {
         score = 900;
         matchType = "exact location match";
@@ -565,7 +754,11 @@ class MapTagger {
         optionText.startsWith(locationLower + " ") ||
         optionValue.startsWith(locationLower + " ") ||
         optionText.startsWith(locationLower) ||
-        optionValue.startsWith(locationLower)
+        optionValue.startsWith(locationLower) ||
+        optionTextNormalized.startsWith(locationNormalized + " ") ||
+        optionValueNormalized.startsWith(locationNormalized + " ") ||
+        optionTextNormalized.startsWith(locationNormalized) ||
+        optionValueNormalized.startsWith(locationNormalized)
       ) {
         score = 800;
         matchType = "prefix match";
@@ -576,10 +769,20 @@ class MapTagger {
           /[.*+?^${}()|[\]\\]/g,
           "\\$&"
         );
+        const escapedLocationNormalized = locationNormalized.replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&"
+        );
         const wordBoundaryRegex = new RegExp(`^${escapedLocation}[,\\s]`, "i");
+        const wordBoundaryRegexNormalized = new RegExp(
+          `^${escapedLocationNormalized}[,\\s]`,
+          "i"
+        );
         if (
           wordBoundaryRegex.test(optionText) ||
-          wordBoundaryRegex.test(optionValue)
+          wordBoundaryRegex.test(optionValue) ||
+          wordBoundaryRegexNormalized.test(optionTextNormalized) ||
+          wordBoundaryRegexNormalized.test(optionValueNormalized)
         ) {
           score = 700;
           matchType = "word boundary match";
@@ -588,9 +791,9 @@ class MapTagger {
 
       // Continue checking other match types if no match found yet
       if (score === 0) {
-        // Medium priority: Normalized exact match (ignore hyphens/spaces)
+        // Medium priority: Normalized exact match (ignore hyphens/spaces and accents)
         const normalizeForMatch = (str) =>
-          str.replace(/[-\s]/g, "").toLowerCase();
+          this.normalizeAccents(str.replace(/[-\s]/g, ""));
         const normalizedLocation = normalizeForMatch(locationLower);
         const normalizedOptionText = normalizeForMatch(optionText);
         const normalizedOptionValue = normalizeForMatch(optionValue);
@@ -602,9 +805,10 @@ class MapTagger {
           score = 600;
           matchType = "normalized match";
         }
-        // Lower priority: All words match (but avoid partial word matches)
+        // Lower priority: All words match (but avoid partial word matches) - with accent normalization
         else if (locationWords.length > 0) {
           const allWordsMatch = locationWords.every((word) => {
+            const wordNormalized = this.normalizeAccents(word);
             // Use word boundary to avoid partial matches (e.g., "paris" in "parish")
             const wordRegex = new RegExp(
               `(^|[^a-z])${word.replace(
@@ -613,15 +817,28 @@ class MapTagger {
               )}([^a-z]|$)`,
               "i"
             );
-            return wordRegex.test(optionText) || wordRegex.test(optionValue);
+            const wordRegexNormalized = new RegExp(
+              `(^|[^a-z])${wordNormalized.replace(
+                /[.*+?^${}()|[\]\\]/g,
+                "\\$&"
+              )}([^a-z]|$)`,
+              "i"
+            );
+            return (
+              wordRegex.test(optionText) ||
+              wordRegex.test(optionValue) ||
+              wordRegexNormalized.test(optionTextNormalized) ||
+              wordRegexNormalized.test(optionValueNormalized)
+            );
           });
           if (allWordsMatch) {
             score = 500;
             matchType = "all words match";
           }
-          // Lower priority: Phrase match with word boundaries
+          // Lower priority: Phrase match with word boundaries - with accent normalization
           else if (locationWords.length > 1) {
             const locationPhrase = locationWords.join(" ");
+            const locationPhraseNormalized = locationWordsNormalized.join(" ");
             const phraseRegex = new RegExp(
               `(^|,\\s*)${locationPhrase.replace(
                 /[.*+?^${}()|[\]\\]/g,
@@ -629,7 +846,19 @@ class MapTagger {
               )}[,\\s]`,
               "i"
             );
-            if (phraseRegex.test(optionText) || phraseRegex.test(optionValue)) {
+            const phraseRegexNormalized = new RegExp(
+              `(^|,\\s*)${locationPhraseNormalized.replace(
+                /[.*+?^${}()|[\]\\]/g,
+                "\\$&"
+              )}[,\\s]`,
+              "i"
+            );
+            if (
+              phraseRegex.test(optionText) ||
+              phraseRegex.test(optionValue) ||
+              phraseRegexNormalized.test(optionTextNormalized) ||
+              phraseRegexNormalized.test(optionValueNormalized)
+            ) {
               score = 400;
               matchType = "phrase match";
             }
@@ -638,6 +867,19 @@ class MapTagger {
       }
 
       if (score > 0) {
+        // Boost score if option matches preferred country
+        if (preferredCountryNormalized) {
+          const optionCountry = this.extractCountry(optionText || optionValue);
+          if (optionCountry) {
+            const optionCountryNormalized =
+              this.normalizeAccents(optionCountry);
+            if (optionCountryNormalized === preferredCountryNormalized) {
+              score += 200; // Boost score by 200 for country match
+              matchType += " (country match)";
+            }
+          }
+        }
+
         matches.push({ option, score, matchType });
       }
     }
@@ -725,198 +967,254 @@ class MapTagger {
       return;
     }
 
-    const daySections = this.findDaySections();
-
-    if (daySections.length === 0) {
+    // Prevent concurrent execution
+    if (this.isProcessing) {
       return;
     }
 
-    // Extract all destinations first - try multiple times if needed
-    const dayDestinations = new Map();
+    this.isProcessing = true;
 
-    for (const daySection of daySections) {
-      try {
-        let destination = this.extractEndDestination(daySection);
+    try {
+      const daySections = this.findDaySections();
 
-        // If extraction failed, try again with the full text
-        if (!destination) {
-          const freshText = daySection.element.textContent?.trim() || "";
-          const tempSection = { ...daySection, text: freshText };
-          destination = this.extractEndDestination(tempSection);
-        }
-
-        if (destination) {
-          // Final validation - ensure destination doesn't start with "Day"
-          destination = destination.replace(/^Day\s*\d+\s*:?\s*/i, "").trim();
-          if (
-            destination &&
-            !destination.match(/^Day\s*\d+/i) &&
-            destination.length > 1
-          ) {
-            dayDestinations.set(daySection.dayNumber, destination);
-          }
-        }
-      } catch (error) {
-        // Continue to next day if extraction fails
-        continue;
+      if (daySections.length === 0) {
+        this.isProcessing = false;
+        return;
       }
-    }
 
-    // Process days sequentially, one at a time
-    for (let i = 0; i < daySections.length; i++) {
-      try {
-        const daySection = daySections[i];
-        const dayKey = `day-${daySection.dayNumber}`;
+      // Extract all destinations first - try multiple times if needed
+      const dayDestinations = new Map();
 
-        // Skip only if successfully processed (not just attempted)
-        if (this.processedDays.has(dayKey)) {
+      for (const daySection of daySections) {
+        try {
+          let destination = this.extractEndDestination(daySection);
+
+          // If extraction failed, try again with the full text
+          if (!destination) {
+            const freshText = daySection.element.textContent?.trim() || "";
+            const tempSection = { ...daySection, text: freshText };
+            destination = this.extractEndDestination(tempSection);
+          }
+
+          if (destination) {
+            // Final validation - ensure destination doesn't start with "Day"
+            destination = destination.replace(/^Day\s*\d+\s*:?\s*/i, "").trim();
+            if (
+              destination &&
+              !destination.match(/^Day\s*\d+/i) &&
+              destination.length > 1
+            ) {
+              dayDestinations.set(daySection.dayNumber, destination);
+            }
+          }
+        } catch (error) {
+          // Continue to next day if extraction fails
           continue;
         }
+      }
 
-        const destination = dayDestinations.get(daySection.dayNumber);
+      // Process days sequentially, one at a time
+      for (let i = 0; i < daySections.length; i++) {
+        try {
+          const daySection = daySections[i];
+          const dayKey = `day-${daySection.dayNumber}`;
 
-        if (destination) {
-          // Find the destination input field for this specific day section
-          let destinationInput = this.findDestinationInputForDay(
-            daySection.element,
-            daySection.dayNumber
-          );
+          // Skip only if successfully processed (not just attempted)
+          if (this.processedDays.has(dayKey)) {
+            continue;
+          }
 
-          // If input not found, try searching more broadly
-          if (destinationInput === null) {
-            // Try finding input in parent containers first
-            let parentContainer = daySection.element.parentElement;
-            for (
-              let j = 0;
-              j < 3 && parentContainer && !destinationInput;
-              j++
-            ) {
-              const parentInputs = parent.querySelectorAll(
-                "input.itidestination, input[class*='itidestination'], input[type='text']"
-              );
-              for (const input of parentInputs) {
-                if (
-                  input.offsetParent !== null &&
-                  !input.disabled &&
-                  !input.readOnly &&
-                  !this.isDestinationAlreadyFilled(input)
-                ) {
-                  const inputId = (input.id || "").toLowerCase();
-                  const inputName = (input.name || "").toLowerCase();
+          const destination = dayDestinations.get(daySection.dayNumber);
+
+          if (destination) {
+            // Find the destination input field for this specific day section
+            let destinationInput = this.findDestinationInputForDay(
+              daySection.element,
+              daySection.dayNumber
+            );
+
+            // If input not found, try searching more broadly
+            if (destinationInput === null) {
+              // Try finding input in parent containers first
+              let parentContainer = daySection.element.parentElement;
+              for (
+                let j = 0;
+                j < 3 && parentContainer && !destinationInput;
+                j++
+              ) {
+                const parentInputs = parentContainer.querySelectorAll(
+                  "input.itidestination, input[class*='itidestination'], input[type='text']"
+                );
+                for (const input of parentInputs) {
                   if (
-                    !inputId.includes("start") &&
-                    !inputName.includes("start") &&
-                    !inputId.includes("end") &&
-                    !inputName.includes("end")
+                    input.offsetParent !== null &&
+                    !input.disabled &&
+                    !input.readOnly &&
+                    !this.isDestinationAlreadyFilled(input)
                   ) {
-                    destinationInput = input;
+                    const inputId = (input.id || "").toLowerCase();
+                    const inputName = (input.name || "").toLowerCase();
+                    if (
+                      !inputId.includes("start") &&
+                      !inputName.includes("start") &&
+                      !inputId.includes("end") &&
+                      !inputName.includes("end")
+                    ) {
+                      destinationInput = input;
+                      break;
+                    }
+                  }
+                }
+                parentContainer = parentContainer.parentElement;
+              }
+
+              // Only check if already filled AFTER trying to find input in parents
+              if (destinationInput === null) {
+                const allInputs = daySection.element.querySelectorAll(
+                  "input.itidestination, input[class*='itidestination'], input[type='text']"
+                );
+                let alreadyFilled = false;
+                for (const input of allInputs) {
+                  if (this.isDestinationAlreadyFilled(input)) {
+                    alreadyFilled = true;
+                    this.processedDays.add(dayKey);
                     break;
                   }
                 }
-              }
-              parentContainer = parentContainer.parentElement;
-            }
 
-            // Only check if already filled AFTER trying to find input in parents
-            if (destinationInput === null) {
-              const allInputs = daySection.element.querySelectorAll(
-                "input.itidestination, input[class*='itidestination'], input[type='text']"
-              );
-              let alreadyFilled = false;
-              for (const input of allInputs) {
-                if (this.isDestinationAlreadyFilled(input)) {
-                  alreadyFilled = true;
-                  this.processedDays.add(dayKey);
-                  break;
+                if (alreadyFilled) {
+                  continue;
                 }
               }
-
-              if (alreadyFilled) {
-                continue;
-              }
             }
-          }
 
-          if (destinationInput) {
-            try {
-              // Fill the input and wait for it to complete
-              await this.fillLocationInput(destinationInput, destination);
+            if (destinationInput) {
+              try {
+                // Fill the input and wait for it to complete
+                const fillResult = await this.fillLocationInput(
+                  destinationInput,
+                  destination
+                );
 
-              // Wait for the dropdown selection to fully complete
-              await new Promise((resolve) => setTimeout(resolve, 3000));
+                // If successfully tagged, mark as processed and move to next day immediately
+                if (fillResult && fillResult.success && fillResult.matchFound) {
+                  const finalValue = (destinationInput.value || "").trim();
 
-              // Verify that the destination was actually tagged - check multiple times
-              let finalValue = (destinationInput.value || "").trim();
-              let isTagged = this.isDestinationTagged(finalValue);
+                  // Extract and update country from the tagged destination
+                  const country = this.extractCountry(finalValue);
+                  if (country) {
+                    this.lastCountry = country;
+                  }
 
-              // If not tagged yet, wait more and check again (dropdown might be slow)
-              if (!isTagged) {
+                  // Mark as processed
+                  this.processedDays.add(dayKey);
+
+                  // Send notification
+                  chrome.runtime
+                    .sendMessage({
+                      action: "locationTagged",
+                      data: {
+                        day: daySection.dayNumber,
+                        destination: finalValue,
+                        timestamp: new Date().toISOString(),
+                      },
+                    })
+                    .catch(() => {
+                      // Ignore errors
+                    });
+
+                  // Move to next day immediately - no need to wait
+                  continue;
+                } else if (
+                  fillResult &&
+                  fillResult.dropdownAppeared &&
+                  !fillResult.matchFound
+                ) {
+                  // Dropdown appeared but no match was found - skip this day (don't retry)
+                  // This means the location doesn't exist in the dropdown
+                  this.processedDays.add(dayKey);
+                  continue;
+                }
+
+                // If dropdown didn't appear or there was an error, verify and retry if needed
+                // Wait a bit and verify the destination was actually tagged
                 await new Promise((resolve) => setTimeout(resolve, 2000));
-                finalValue = (destinationInput.value || "").trim();
-                isTagged = this.isDestinationTagged(finalValue);
-              }
 
-              // Final check after another wait
-              if (!isTagged) {
-                await new Promise((resolve) => setTimeout(resolve, 1500));
-                finalValue = (destinationInput.value || "").trim();
-                isTagged = this.isDestinationTagged(finalValue);
-              }
+                let finalValue = (destinationInput.value || "").trim();
+                let isTagged = this.isDestinationTagged(finalValue);
 
-              if (isTagged) {
-                // Mark as processed ONLY after successful tagging
-                this.processedDays.add(dayKey);
+                // If not tagged yet, wait more and check again
+                if (!isTagged) {
+                  await new Promise((resolve) => setTimeout(resolve, 1500));
+                  finalValue = (destinationInput.value || "").trim();
+                  isTagged = this.isDestinationTagged(finalValue);
+                }
 
-                // Send notification
-                chrome.runtime
-                  .sendMessage({
-                    action: "locationTagged",
-                    data: {
-                      day: daySection.dayNumber,
-                      destination: finalValue,
-                      timestamp: new Date().toISOString(),
-                    },
-                  })
-                  .catch(() => {
-                    // Ignore errors
-                  });
+                if (isTagged) {
+                  // Extract and update country from the tagged destination
+                  const country = this.extractCountry(finalValue);
+                  if (country) {
+                    this.lastCountry = country;
+                  }
+
+                  // Mark as processed after verification
+                  this.processedDays.add(dayKey);
+
+                  // Send notification
+                  chrome.runtime
+                    .sendMessage({
+                      action: "locationTagged",
+                      data: {
+                        day: daySection.dayNumber,
+                        destination: finalValue,
+                        timestamp: new Date().toISOString(),
+                      },
+                    })
+                    .catch(() => {
+                      // Ignore errors
+                    });
+                }
+                // If still not tagged, don't mark as processed - allow retry
+              } catch (fillError) {
+                // If filling failed, don't mark as processed - allow retry
               }
-              // If not tagged, don't mark as processed - allow retry
-            } catch (fillError) {
-              // If filling failed, don't mark as processed - allow retry
+            } else {
+              // Input not found - don't mark as processed, allow retry
+              // But wait a bit to avoid infinite loops
+              await new Promise((resolve) => setTimeout(resolve, 500));
             }
           } else {
-            // Input not found - don't mark as processed, allow retry
-            // But wait a bit to avoid infinite loops
-            await new Promise((resolve) => setTimeout(resolve, 500));
-          }
-        } else {
-          // No destination extracted - only mark as processed if we're sure there's no destination
-          // Check if there's a "Destination:" field that's already filled
-          const allInputs = daySection.element.querySelectorAll(
-            "input.itidestination, input[class*='itidestination'], input[type='text']"
-          );
-          let hasFilledInput = false;
-          for (const input of allInputs) {
-            if (this.isDestinationAlreadyFilled(input)) {
-              hasFilledInput = true;
-              break;
+            // No destination extracted - only mark as processed if we're sure there's no destination
+            // Check if there's a "Destination:" field that's already filled
+            const allInputs = daySection.element.querySelectorAll(
+              "input.itidestination, input[class*='itidestination'], input[type='text']"
+            );
+            let hasFilledInput = false;
+            for (const input of allInputs) {
+              if (this.isDestinationAlreadyFilled(input)) {
+                hasFilledInput = true;
+                break;
+              }
             }
+
+            // Only mark as processed if there's a filled input (meaning destination exists but we couldn't extract it)
+            if (hasFilledInput) {
+              this.processedDays.add(dayKey);
+            }
+            // Otherwise, don't mark - allow retry in case extraction improves
           }
 
-          // Only mark as processed if there's a filled input (meaning destination exists but we couldn't extract it)
-          if (hasFilledInput) {
-            this.processedDays.add(dayKey);
-          }
-          // Otherwise, don't mark - allow retry in case extraction improves
+          // Only wait if we didn't already continue (i.e., if we're still processing this day)
+          // This prevents unnecessary delays after successful tagging
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        } catch (dayError) {
+          // If processing a day fails, continue to next day
+          await new Promise((resolve) => setTimeout(resolve, 500));
         }
-
-        // Wait before processing next day to ensure previous one is complete
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-      } catch (dayError) {
-        // If processing a day fails, continue to next day
-        await new Promise((resolve) => setTimeout(resolve, 500));
       }
+    } finally {
+      // Always reset the processing flag
+      this.isProcessing = false;
     }
   }
 }

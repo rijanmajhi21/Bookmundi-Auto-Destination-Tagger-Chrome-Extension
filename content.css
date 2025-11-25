@@ -3,7 +3,7 @@
   position: absolute;
   top: 10px;
   right: 10px;
-  background-color: #4caf50;
+  background-color: #3eb368;
   color: white;
   padding: 6px 12px;
   border-radius: 4px;
@@ -28,6 +28,6 @@
 
 /* Highlight tagged maps */
 [data-tagged="true"] {
-  border: 2px solid #4caf50;
+  border: 2px solid #3eb368;
   border-radius: 4px;
 }
